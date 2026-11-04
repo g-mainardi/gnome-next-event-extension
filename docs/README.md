@@ -10,7 +10,7 @@ Use a stable reverse-domain style UUID:
 - `extension-name@yourname.dev`
 - `extension-name@github-username.github.io`
 
-Current UUID for this project: `next-event@bhavik.dev`
+Current UUID for this project: `next-event@g-mainardi.github.io`
 
 Rules:
 
@@ -37,7 +37,7 @@ Rules:
    . venv/bin/activate
    pip install -U shexli
    shexli .
-   shexli dist/next-event@bhavik.dev.shell-extension.zip
+   shexli dist/next-event@g-mainardi.github.io.shell-extension.zip
    ```
 
 `version` in `metadata.json` is deprecated for EGO submission and should be omitted.

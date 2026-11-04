@@ -44,4 +44,4 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/next-event@bhavik.dev.shell-extension.zip
+          files: dist/next-event@g-mainardi.github.io.shell-extension.zip
