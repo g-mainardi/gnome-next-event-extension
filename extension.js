@@ -21,6 +21,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+import { isAllDay, pickBarEvents } from './events.js';
+
 const DEFAULT_PANEL_POSITION = 'center';
 const DEFAULT_FONT_SIZE = 15;
 const DEFAULT_MAX_TITLE_LENGTH = 35;
@@ -28,26 +30,6 @@ const DEFAULT_REFRESH_INTERVAL_SECONDS = 60;
 const MIN_REFRESH_INTERVAL_SECONDS = 10;
 const PANEL_POSITIONS = new Set(['left', 'center', 'right']);
 const SEPARATOR = '  |  ';
-
-/** An event is "all day" for today if it covers the whole day. */
-function isAllDay(ev, todayStart, tomorrowStart) {
-    return ev.date <= todayStart && ev.end >= tomorrowStart;
-}
-
-/**
- * Timed events that go in the top bar: every ongoing one if any,
- * otherwise every upcoming one starting at the earliest start time.
- */
-export function pickBarEvents(timed, now) {
-    const ongoing = timed.filter(ev => ev.date <= now && ev.end > now);
-    if (ongoing.length > 0)
-        return ongoing;
-    const upcoming = timed.filter(ev => ev.date > now);
-    if (upcoming.length === 0)
-        return [];
-    const first = Math.min(...upcoming.map(ev => ev.date.getTime()));
-    return upcoming.filter(ev => ev.date.getTime() === first);
-}
 
 export default class NextEventExtension extends Extension {
     enable() {

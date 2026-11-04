@@ -29,7 +29,7 @@ jobs:
           out_dir.mkdir(parents=True, exist_ok=True)
           out_file = out_dir / f'{uuid}.shell-extension.zip'
 
-          required = [root / 'metadata.json', root / 'extension.js', root / 'prefs.js']
+          required = [root / 'metadata.json', root / 'extension.js', root / 'prefs.js', root / 'events.js']
           schemas = sorted((root / 'schemas').glob('*.gschema.xml'))
 
           with ZipFile(out_file, 'w', compression=ZIP_DEFLATED) as zf:
