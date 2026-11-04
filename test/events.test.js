@@ -1,4 +1,4 @@
-// Run: gjs -m test/events.test.js
+// Run: gjs -m test/events.test.js  (or npm test)
 import { isAllDay, pickBarEvents } from '../events.js';
 
 const at = (h, m = 0) => new Date(2026, 0, 1, h, m);

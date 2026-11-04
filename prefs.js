@@ -1,3 +1,4 @@
+// @ts-check
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
@@ -7,7 +8,8 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 const POSITIONS = ['left', 'center', 'right'];
 
 export default class NextEventPreferences extends ExtensionPreferences {
-    fillPreferencesWindow(window) {
+    /** @param {Adw.PreferencesWindow} window */
+    async fillPreferencesWindow(window) {
         const settings = this.getSettings();
         const positionLabels = [_('Left'), _('Center'), _('Right')];
 

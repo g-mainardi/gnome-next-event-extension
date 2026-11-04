@@ -10,6 +10,7 @@
  * - All-day events are listed in the menu only, never in the top bar.
  * - Overlapping events are all shown in the top bar.
  */
+// @ts-check
 
 import St from 'gi://St';
 import GLib from 'gi://GLib';
@@ -30,6 +31,26 @@ const DEFAULT_REFRESH_INTERVAL_SECONDS = 60;
 const MIN_REFRESH_INTERVAL_SECONDS = 10;
 const PANEL_POSITIONS = new Set(['left', 'center', 'right']);
 const SEPARATOR = '  |  ';
+
+/**
+ * Private shell API we rely on; not in the public typings, so declared here.
+ * @typedef {import('./events.js').CalendarEvent} CalendarEvent
+ * @typedef {object} ShellEventSource dateMenu._eventSource
+ * @property {(begin: Date, end: Date) => CalendarEvent[]} getEvents
+ * @property {Date} [_curRequestBegin]
+ * @property {Date} [_curRequestEnd]
+ * @property {(signal: 'changed', cb: () => void) => number} connect
+ * @property {(id: number) => void} disconnect
+ * @typedef {object} PrivateDateMenu
+ * @property {ShellEventSource} [_eventSource]
+ * @property {{setDate(date: Date): void}} [_calendar]
+ * @property {{isOpen: boolean}} menu
+ */
+
+/** @returns {PrivateDateMenu | undefined} */
+function dateMenu() {
+    return /** @type {any} */ (Main.panel.statusArea).dateMenu;
+}
 
 export default class NextEventExtension extends Extension {
     enable() {
@@ -117,7 +138,7 @@ export default class NextEventExtension extends Extension {
      * changes (e.g. lock screen), so re-check on every refresh.
      */
     _syncEventSource() {
-        const source = Main.panel.statusArea.dateMenu?._eventSource ?? null;
+        const source = dateMenu()?._eventSource ?? null;
         if (source === this._eventSource)
             return;
         this._disconnectEventSource();
@@ -138,18 +159,19 @@ export default class NextEventExtension extends Extension {
      * on another month, bring it back to today, but never while it's open.
      */
     _ensureTodayLoaded(todayStart, tomorrowStart) {
-        const dateMenu = Main.panel.statusArea.dateMenu;
+        const menu = dateMenu();
         const begin = this._eventSource?._curRequestBegin;
         const end = this._eventSource?._curRequestEnd;
-        if (!dateMenu || dateMenu.menu.isOpen || !begin || !end)
+        if (!menu || menu.menu.isOpen || !begin || !end)
             return;
         if (begin > todayStart || end < tomorrowStart)
-            dateMenu._calendar?.setDate(new Date());
+            menu._calendar?.setDate(new Date());
     }
 
+    /** @returns {'left' | 'center' | 'right'} */
     _getPanelPosition() {
         const value = this._settings?.get_string('panel-position') || DEFAULT_PANEL_POSITION;
-        return PANEL_POSITIONS.has(value) ? value : DEFAULT_PANEL_POSITION;
+        return /** @type {any} */ (PANEL_POSITIONS.has(value) ? value : DEFAULT_PANEL_POSITION);
     }
 
     _getMaxTitleLength() {
@@ -213,7 +235,9 @@ export default class NextEventExtension extends Extension {
         if (!this._indicator)
             return;
 
-        this._indicator.menu.removeAll();
+        // Created with dontCreateMenu = false, so it's a real PopupMenu.
+        const menu = /** @type {PopupMenu.PopupMenu} */ (this._indicator.menu);
+        menu.removeAll();
 
         const now = new Date();
         const rows = [
@@ -222,7 +246,7 @@ export default class NextEventExtension extends Extension {
         ];
 
         if (rows.length === 0) {
-            this._indicator.menu.addMenuItem(new PopupMenu.PopupMenuItem('No upcoming events today', {
+            menu.addMenuItem(new PopupMenu.PopupMenuItem('No upcoming events today', {
                 reactive: false,
                 can_focus: false,
             }));
@@ -237,7 +261,7 @@ export default class NextEventExtension extends Extension {
                 if (app)
                     app.launch([], global.create_app_launch_context(0, -1));
             });
-            this._indicator.menu.addMenuItem(item);
+            menu.addMenuItem(item);
         }
     }
 

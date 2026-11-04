@@ -1,3 +1,4 @@
+// @ts-check
 // Pure event logic, no shell imports, so it can be tested with plain gjs.
 
 /**

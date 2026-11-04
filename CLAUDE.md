@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-GNOME Shell extension (ESM, GNOME 45–50) that shows today's next calendar event in the top bar. Personal fork of Bhavik-ag/gnome-next-event-extension with its own UUID `next-event@g-mainardi.github.io`. No build step, no dependencies.
+GNOME Shell extension (ESM, GNOME 45–50) that shows today's next calendar event in the top bar. Personal fork of Bhavik-ag/gnome-next-event-extension with its own UUID `next-event@g-mainardi.github.io`. Plain JS, no build step, no runtime dependencies. `node_modules` is dev-only (type checking).
 
 ## Commands
 
@@ -12,8 +12,9 @@ gnome-extensions install --force dist/next-event@g-mainardi.github.io.shell-exte
 gnome-extensions enable next-event@g-mainardi.github.io
 gnome-extensions prefs next-event@g-mainardi.github.io
 journalctl -f -o cat /usr/bin/gnome-shell   # extension errors/logs
-shexli . && shexli dist/*.zip     # EGO static checks (pip install shexli in a venv)
-gjs -m test/events.test.js        # pickBarEvents/isAllDay self-check
+shexli dist/*.zip                 # EGO static checks (pip install shexli in a venv); `shexli .` chokes on node_modules
+npm install && npm run check      # tsc type-checks the JS via // @ts-check + @girs types, emits nothing
+npm test                          # gjs -m test/events.test.js
 ```
 
 On Wayland the shell does not reload extension code; log out and back in after reinstalling.
@@ -26,7 +27,7 @@ Releases: pushing a `v*` tag runs `.github/workflows/release.yml`, which builds 
 - `events.js` — pure event logic (`isAllDay`, `pickBarEvents`), no shell imports so `gjs` can test it outside the shell.
 - `prefs.js` — Adw preferences window bound to the GSettings schema in `schemas/` (panel position, font size, max title length, refresh interval, "Now" indicator). Adding a setting means: schema key + prefs row + `_connectSettingsSignals()` handler in `extension.js`.
 
-Key design point (the reason for the fork): the extension does **not** create its own calendar source. `gnome-shell-calendar-server` holds a single requested time range shared by all clients, so a private "today" source would clobber the date menu's month range. Instead it borrows `Main.panel.statusArea.dateMenu._eventSource` (private shell API):
+Key design point (the reason for the fork): the extension does **not** create its own calendar source. `gnome-shell-calendar-server` holds a single requested time range shared by all clients, so a private "today" source would clobber the date menu's month range. Instead it borrows `Main.panel.statusArea.dateMenu._eventSource` (private shell API, typed by hand in the `PrivateDateMenu`/`ShellEventSource` JSDoc typedefs since `@girs` doesn't cover it):
 - `_syncEventSource()` re-resolves it on every refresh because the shell replaces it on session-mode changes (lock screen).
 - `_ensureTodayLoaded()` reads the source's `_curRequestBegin/_curRequestEnd`; if the user navigated the date-menu calendar to another month, it resets it to today via `dateMenu._calendar.setDate()` — but never while the date menu is open.
 

@@ -1,0 +1,16 @@
+{
+  // Type-check the plain JS sources; nothing is emitted, the shell runs the .js as-is.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "lib": ["ES2022"],
+    "types": ["@girs/gjs", "@girs/gjs/dom", "@girs/gnome-shell/ambient", "@girs/gnome-shell/extensions/global"]
+  },
+  "include": ["extension.js", "prefs.js", "events.js"]
+}
