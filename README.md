@@ -6,7 +6,7 @@
 > - Reuses the shell's calendar event source. `gnome-shell-calendar-server` keeps one time range for all clients, so the upstream's private "today only" source left every other day empty in the top-bar calendar.
 > - All-day events appear only in the dropdown menu, never in the top bar.
 > - Overlapping events are all shown in the top bar, separated by `|`.
-> - Clicking an event opens GNOME Calendar through its `.desktop` file, which also works for the Flatpak build; times use 24-hour format.
+> - Clicking an event opens the default calendar app (the `text/calendar` handler, the same one the top-bar calendar opens); times use 24-hour format.
 
 Shows today’s next calendar event in the GNOME top bar. Click the widget to see all upcoming events for today, then click any event to open GNOME Calendar.
 

@@ -14,13 +14,12 @@
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
-import Shell from 'gi://Shell';
+import Gio from 'gi://Gio';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as Util from 'resource:///org/gnome/shell/misc/util.js';
 
 const DEFAULT_PANEL_POSITION = 'center';
 const DEFAULT_FONT_SIZE = 15;
@@ -251,12 +250,10 @@ export default class NextEventExtension extends Extension {
         for (const text of rows) {
             const item = new PopupMenu.PopupMenuItem(text);
             item.connect('activate', () => {
-                // Calendar is a Flatpak here: launch via its .desktop file, not the binary name
-                const app = Shell.AppSystem.get_default().lookup_app('org.gnome.Calendar.desktop');
+                // Same app the top-bar calendar opens: the default text/calendar handler
+                const app = Gio.AppInfo.get_default_for_type('text/calendar', false);
                 if (app)
-                    app.activate();
-                else
-                    Util.spawn(['gnome-calendar']);
+                    app.launch([], global.create_app_launch_context(0, -1));
             });
             this._indicator.menu.addMenuItem(item);
         }
