@@ -1,15 +1,23 @@
 /**
  * Next Event - GNOME Shell Extension
  * Shows the next upcoming calendar event for today in the top bar.
+ *
+ * Local changes:
+ * - Reuses the shell's own calendar event source instead of creating a second
+ *   one. gnome-shell-calendar-server keeps a single time range for everybody,
+ *   so a private source asking for "today" clobbered the date menu's month range
+ *   and left every other day empty.
+ * - All-day events are listed in the menu only, never in the top bar.
+ * - Overlapping events are all shown in the top bar.
  */
 
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import Shell from 'gi://Shell';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as Calendar from 'resource:///org/gnome/shell/ui/calendar.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Util from 'resource:///org/gnome/shell/misc/util.js';
@@ -20,72 +28,67 @@ const DEFAULT_MAX_TITLE_LENGTH = 35;
 const DEFAULT_REFRESH_INTERVAL_SECONDS = 60;
 const MIN_REFRESH_INTERVAL_SECONDS = 10;
 const PANEL_POSITIONS = new Set(['left', 'center', 'right']);
+const SEPARATOR = '  |  ';
+
+/** An event is "all day" for today if it covers the whole day. */
+function isAllDay(ev, todayStart, tomorrowStart) {
+    return ev.date <= todayStart && ev.end >= tomorrowStart;
+}
+
+/**
+ * Timed events that go in the top bar: every ongoing one if any,
+ * otherwise every upcoming one starting at the earliest start time.
+ */
+export function pickBarEvents(timed, now) {
+    const ongoing = timed.filter(ev => ev.date <= now && ev.end > now);
+    if (ongoing.length > 0)
+        return ongoing;
+    const upcoming = timed.filter(ev => ev.date > now);
+    if (upcoming.length === 0)
+        return [];
+    const first = Math.min(...upcoming.map(ev => ev.date.getTime()));
+    return upcoming.filter(ev => ev.date.getTime() === first);
+}
 
 export default class NextEventExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._settingsSignals = [];
-        this._upcomingEvents = [];
+        this._allDayEvents = [];
+        this._timedEvents = [];
         this._createIndicator();
-
-        this._createEventSource();
-
         this._startTimer();
         this._connectSettingsSignals();
-
-        this._requestAndRefresh();
+        this._refresh();
     }
 
     disable() {
-        if (this._initialRefreshId) {
-            GLib.source_remove(this._initialRefreshId);
-            this._initialRefreshId = null;
-        }
-
         if (this._timerId) {
             GLib.source_remove(this._timerId);
             this._timerId = null;
         }
 
-        if (this._eventSource) {
-            if (this._changedId) {
-                this._eventSource.disconnect(this._changedId);
-                this._changedId = null;
-            }
-            this._eventSource.destroy();
-            this._eventSource = null;
-        }
+        this._disconnectEventSource();
 
         if (this._settings && this._settingsSignals) {
             for (const id of this._settingsSignals)
                 this._settings.disconnect(id);
         }
 
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
-        }
-
-        if (this._label) {
-            this._label.destroy();
-            this._label = null;
-        }
+        // The label is a child of the indicator and dies with it.
+        this._indicator?.destroy();
+        this._indicator = null;
+        this._label = null;
 
         this._settingsSignals = [];
         this._settings = null;
-        this._upcomingEvents = [];
+        this._allDayEvents = [];
+        this._timedEvents = [];
     }
 
     _createIndicator() {
         const currentText = this._label?.get_text() || 'Loading...';
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
-        }
-        if (this._label) {
-            this._label.destroy();
-            this._label = null;
-        }
+        this._indicator?.destroy();
 
         this._indicator = new PanelMenu.Button(0.5, 'Next Event', false);
         this._label = new St.Label({
@@ -100,37 +103,15 @@ export default class NextEventExtension extends Extension {
     }
 
     _connectSettingsSignals() {
-        this._settingsSignals.push(
-            this._settings.connect('changed::panel-position', () => {
-                this._createIndicator();
-                this._refresh();
-            })
-        );
-
-        this._settingsSignals.push(
-            this._settings.connect('changed::font-size', () => {
-                this._updateLabelStyle();
-            })
-        );
-
-        this._settingsSignals.push(
-            this._settings.connect('changed::max-title-length', () => {
-                this._refresh();
-            })
-        );
-
-        this._settingsSignals.push(
-            this._settings.connect('changed::refresh-interval-seconds', () => {
-                this._startTimer();
-                this._requestAndRefresh(true);
-            })
-        );
-
-        this._settingsSignals.push(
-            this._settings.connect('changed::show-ongoing-indicator', () => {
-                this._refresh();
-            })
-        );
+        const on = (key, fn) => this._settingsSignals.push(this._settings.connect(`changed::${key}`, fn));
+        on('panel-position', () => {
+            this._createIndicator();
+            this._refresh();
+        });
+        on('font-size', () => this._updateLabelStyle());
+        on('max-title-length', () => this._refresh());
+        on('refresh-interval-seconds', () => this._startTimer());
+        on('show-ongoing-indicator', () => this._refresh());
     }
 
     _startTimer() {
@@ -144,30 +125,45 @@ export default class NextEventExtension extends Extension {
             this._settings?.get_int('refresh-interval-seconds') ?? DEFAULT_REFRESH_INTERVAL_SECONDS
         );
 
-        this._timerId = GLib.timeout_add_seconds(
-            GLib.PRIORITY_DEFAULT,
-            interval,
-            () => {
-                this._requestAndRefresh(true);
-                return GLib.SOURCE_CONTINUE;
-            }
-        );
+        this._timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
+            this._refresh();
+            return GLib.SOURCE_CONTINUE;
+        });
     }
 
-    _createEventSource() {
-        if (this._eventSource) {
-            if (this._changedId) {
-                this._eventSource.disconnect(this._changedId);
-                this._changedId = null;
-            }
-            this._eventSource.destroy();
-            this._eventSource = null;
-        }
+    /**
+     * Follow the date menu's event source. The shell swaps it on session mode
+     * changes (e.g. lock screen), so re-check on every refresh.
+     */
+    _syncEventSource() {
+        const source = Main.panel.statusArea.dateMenu?._eventSource ?? null;
+        if (source === this._eventSource)
+            return;
+        this._disconnectEventSource();
+        this._eventSource = source;
+        if (source)
+            this._changedId = source.connect('changed', () => this._refresh());
+    }
 
-        this._eventSource = new Calendar.DBusEventSource();
-        this._changedId = this._eventSource.connect('changed', () => {
-            this._requestAndRefresh();
-        });
+    _disconnectEventSource() {
+        if (this._eventSource && this._changedId)
+            this._eventSource.disconnect(this._changedId);
+        this._eventSource = null;
+        this._changedId = null;
+    }
+
+    /**
+     * The shell only loads the month shown in its calendar. If the user left it
+     * on another month, bring it back to today, but never while it's open.
+     */
+    _ensureTodayLoaded(todayStart, tomorrowStart) {
+        const dateMenu = Main.panel.statusArea.dateMenu;
+        const begin = this._eventSource?._curRequestBegin;
+        const end = this._eventSource?._curRequestEnd;
+        if (!dateMenu || dateMenu.menu.isOpen || !begin || !end)
+            return;
+        if (begin > todayStart || end < tomorrowStart)
+            dateMenu._calendar?.setDate(new Date());
     }
 
     _getPanelPosition() {
@@ -192,74 +188,44 @@ export default class NextEventExtension extends Extension {
         this._label.set_style(`font-size: ${fontSize}px; padding: 0 8px;`);
     }
 
-    /**
-     * Ask the event source to load today's range, then refresh the display.
-     * DBusEventSource is lazy — it only fetches data when a range is requested.
-     */
-    _requestAndRefresh(forceReload = false) {
-        if (forceReload)
-            this._createEventSource();
-
-        const now = new Date();
-
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-        this._eventSource.requestRange(todayStart, todayEnd);
-
-        if (this._initialRefreshId) {
-            GLib.source_remove(this._initialRefreshId);
-            this._initialRefreshId = null;
-        }
-
-        this._initialRefreshId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-            this._initialRefreshId = null;
-            this._refresh();
-            return GLib.SOURCE_REMOVE;
-        });
+    _title(ev) {
+        const max = this._getMaxTitleLength();
+        const title = ev.summary || 'Untitled Event';
+        return title.length > max ? `${title.substring(0, max - 1)}...` : title;
     }
 
-    /**
-     * Query the event source for today's events, find the next upcoming one,
-     * and update the panel label.
-     */
+    _timeText(ev, now) {
+        const isNow = ev.date <= now && ev.end > now;
+        return isNow && this._shouldShowOngoingIndicator() ? 'Now' : this._formatTime(ev.date);
+    }
+
     _refresh() {
-        if (!this._label || !this._eventSource || !this._indicator)
+        if (!this._label || !this._indicator)
+            return;
+
+        this._syncEventSource();
+        if (!this._eventSource)
             return;
 
         const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-        const todayEnd   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
-        const events = this._eventSource.getEvents(todayStart, todayEnd);
-        const upcoming = (events || [])
-            .filter(ev => ev.date >= now || ev.end >= now)
+        this._ensureTodayLoaded(todayStart, tomorrowStart);
+
+        const events = this._eventSource.getEvents(todayStart, tomorrowStart) || [];
+        this._allDayEvents = events.filter(ev => isAllDay(ev, todayStart, tomorrowStart));
+        const timed = events
+            .filter(ev => !isAllDay(ev, todayStart, tomorrowStart))
             .sort((a, b) => a.date - b.date);
-        this._upcomingEvents = upcoming;
+        this._timedEvents = timed.filter(ev => ev.end > now);
         this._populateMenu();
 
-        if (!events || events.length === 0) {
-            this._label.set_text('No events today');
-            return;
-        }
-
-        if (upcoming.length === 0) {
-            this._label.set_text('Done for today');
-            return;
-        }
-
-        const next = upcoming[0];
-        const timeStr = this._formatTime(next.date);
-        const maxTitleLength = this._getMaxTitleLength();
-
-        let title = next.summary || 'Untitled Event';
-        if (title.length > maxTitleLength)
-            title = title.substring(0, maxTitleLength - 1) + '...';
-
-        const isNow = next.date <= now && next.end >= now;
-        const prefix = isNow && this._shouldShowOngoingIndicator() ? 'Now' : timeStr;
-
-        this._label.set_text(`${prefix} · ${title}`);
+        const bar = pickBarEvents(timed, now);
+        if (bar.length > 0)
+            this._label.set_text(bar.map(ev => `${this._timeText(ev, now)} · ${this._title(ev)}`).join(SEPARATOR));
+        else
+            this._label.set_text(timed.length === 0 ? 'No events today' : 'Done for today');
     }
 
     _populateMenu() {
@@ -268,38 +234,38 @@ export default class NextEventExtension extends Extension {
 
         this._indicator.menu.removeAll();
 
-        if (!this._upcomingEvents || this._upcomingEvents.length === 0) {
-            const emptyItem = new PopupMenu.PopupMenuItem('No upcoming events today', {
+        const now = new Date();
+        const rows = [
+            ...this._allDayEvents.map(ev => `All day · ${this._title(ev)}`),
+            ...this._timedEvents.map(ev => `${this._timeText(ev, now)} · ${this._title(ev)}`),
+        ];
+
+        if (rows.length === 0) {
+            this._indicator.menu.addMenuItem(new PopupMenu.PopupMenuItem('No upcoming events today', {
                 reactive: false,
                 can_focus: false,
-            });
-            this._indicator.menu.addMenuItem(emptyItem);
+            }));
             return;
         }
 
-        for (const ev of this._upcomingEvents) {
-            const now = new Date();
-            const isNow = ev.date <= now && ev.end >= now;
-            const timeText = isNow && this._shouldShowOngoingIndicator()
-                ? 'Now'
-                : this._formatTime(ev.date);
-            const maxTitleLength = this._getMaxTitleLength();
-            let title = ev.summary || 'Untitled Event';
-            if (title.length > maxTitleLength)
-                title = title.substring(0, maxTitleLength - 1) + '...';
-
-            const item = new PopupMenu.PopupMenuItem(`${timeText} · ${title}`);
+        for (const text of rows) {
+            const item = new PopupMenu.PopupMenuItem(text);
             item.connect('activate', () => {
-                Util.spawn(['gnome-calendar']);
+                // Calendar is a Flatpak here: launch via its .desktop file, not the binary name
+                const app = Shell.AppSystem.get_default().lookup_app('org.gnome.Calendar.desktop');
+                if (app)
+                    app.activate();
+                else
+                    Util.spawn(['gnome-calendar']);
             });
             this._indicator.menu.addMenuItem(item);
         }
     }
 
     /**
-     * Format a Date object to a human-readable time string (e.g. "3:30 PM").
+     * Format a Date object to a human-readable time string (e.g. "15:30").
      */
     _formatTime(date) {
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
     }
 }
