@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-GNOME Shell extension (ESM, GNOME 45–50) that shows today's next calendar event in the top bar. Personal fork of Bhavik-ag/gnome-next-event-extension with its own UUID `next-event@g-mainardi.github.io`. Plain JS, no build step, no runtime dependencies. `node_modules` is dev-only (type checking).
+GNOME Shell extension (ESM, GNOME 45–51) that shows today's next calendar event in the top bar. Personal fork of Bhavik-ag/gnome-next-event-extension with its own UUID `next-event@g-mainardi.github.io`. Plain JS, no build step, no runtime dependencies. `node_modules` is dev-only (type checking).
 
 ## Commands
 
